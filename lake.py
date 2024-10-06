@@ -3,6 +3,8 @@ import gymnasium as gym
 import random
 import time
 from IPython.display import clear_output
+import matplotlib.pyplot as plt
+plt.ion()
 
 # from gymnasium.envs.toy_text.frozen_lake import generate_random_map
 # gym.make('FrozenLake-v1', desc=generate_random_map(size=8))
@@ -16,7 +18,7 @@ rewards_all_episodes = []
 #     "HFFG",
 # ]
 
-env = gym.make("FrozenLake-v1", render_mode="ansi")
+env = gym.make("FrozenLake-v1", render_mode="rgb_array")
 
 action_space_size = env.action_space.n
 state_space_size = env.observation_space.n
@@ -60,7 +62,7 @@ for episode in range(num_episodes):
         state = new_state
         rewards_current_episode += reward
         
-        if done == True:
+        if done:
             break
         
     #Exploration rate decay
@@ -79,3 +81,45 @@ for r in rewards_per_thousand_episodes:
 # Print updated Q-table
 print("\n\n*****Q-table*****\n")
 print(q_table)
+
+
+for episode in range(3):
+    state = env.reset()[0]
+    done = False
+    print("****EPISODE ", episode, "******")
+    time.sleep(1)
+    plt.show()
+    
+    for i in range(max_steps_per_episode):
+        rgb_array = env.render()
+        plt.imshow(rgb_array)
+        plt.draw()
+        plt.pause(0.001)
+        
+        action = np.argmax(q_table[state,:])
+        
+        going = {
+            0: "Left",
+            1: "Down",
+            2: "Right",
+            3: "Up"
+        }[action]
+        
+        print("Going: ", going)
+        new_state, reward, done, truncated, info = env.step(action)
+        
+        if done:
+            if reward == 1:
+                print("Found it!")
+                time.sleep(3)
+            else:
+                print("Probably died")
+                time.sleep(3)    
+            break
+            
+        state = new_state
+        
+    env.close()
+    
+print("Finished")
+input("enter to be done")
