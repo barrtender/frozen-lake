@@ -30,17 +30,38 @@ class DQN(nn.Module):
     def __init__(self, img_height, img_width):
         super().__init__()
 
-        self.fc1 = nn.Linear(in_features=img_height * img_width * 3, out_features=24)
-        self.fc2 = nn.Linear(in_features=24, out_features=32)
-        self.out = nn.Linear(in_features=32, out_features=2)
+        # self.fc1 = nn.Linear(in_features=img_height * img_width * 3, out_features=24)
+        # self.fc2 = nn.Linear(in_features=24, out_features=32)
+        # self.out = nn.Linear(in_features=32, out_features=2)
+        self.fc1 = nn.Linear(in_features=img_height * img_width * 3, out_features=512)
+        self.fc2 = nn.Linear(in_features=512, out_features=256)
+        self.fc3 = nn.Linear(in_features=256, out_features=128)
+        self.out = nn.Linear(in_features=128, out_features=2)
+        
+    def forward(self, t):
+        # t = t.flatten(start_dim=1)
+        # t = F.relu(self.fc1(t))
+        # t = F.relu(self.fc2(t))
+        # t = self.out(t)
+        t = t.flatten(start_dim=1)
+        t = F.relu(self.fc1(t))
+        t = F.relu(self.fc2(t))
+        t = F.relu(self.fc3(t))
+        t = self.out(t)
+        return t
+
+class SimpleDQN(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.fc1 = nn.Linear(4, 128)  # CartPole state is [position, velocity, angle, angular_velocity]
+        self.fc2 = nn.Linear(128, 128)
+        self.out = nn.Linear(128, 2)
 
     def forward(self, t):
-        t = t.flatten(start_dim=1)
         t = F.relu(self.fc1(t))
         t = F.relu(self.fc2(t))
         t = self.out(t)
         return t
-
 
 Experience = namedtuple("Experience", ("state", "action", "next_state", "reward"))
 
@@ -110,9 +131,17 @@ class CartPoleEnvManager:
         self.current_screen = None
         self.done = False
 
+    # def reset(self):
+    #     self.env.reset()
+    #     self.current_screen = None
+    #     self.done = False
+
+
     def reset(self):
-        self.env.reset()
+        observation, _ = self.env.reset()  # Updated for new gym API
+        self.last_observation = observation
         self.current_screen = None
+        self.done = False
 
     def close(self):
         self.env.close()
@@ -123,26 +152,48 @@ class CartPoleEnvManager:
     def num_actions_available(self):
         return self.env.action_space.n
 
+    # def take_action(self, action):
+    #     # Updated for the most recent version
+    #     # See docs here https://gymnasium.farama.org/api/env/#gymnasium.Env.step
+    #     _, reward, terminated, truncated, _ = self.env.step(action.item())
+    #     self.done = terminated or truncated    
+    #     print(f"Raw reward from env: {reward}, terminated: {terminated}, truncated: {truncated}")
+    #     # if self.done:
+    #     #     reward = 0
+    #     return torch.tensor([reward], device=self.device)
+
+
     def take_action(self, action):
-        # Updated for the most recent version
-        # See docs here https://gymnasium.farama.org/api/env/#gymnasium.Env.step
-        _, reward, terminated, truncated, _ = self.env.step(action.item())
+        observation, reward, terminated, truncated, _ = self.env.step(action.item())
         self.done = terminated or truncated
+        self.last_observation = observation  # Store for next get_state() call
+        if self.done:
+            reward = -1
         return torch.tensor([reward], device=self.device)
+
 
     def just_starting(self):
         return self.current_screen is None
 
+    # def get_state(self):
+    #     if self.just_starting():
+    #         self.current_screen = self.get_processed_screen()
+    #         black_screen = torch.zeros_like(self.current_screen)
+    #         return black_screen
+    #     else:
+    #         s1 = self.current_screen
+    #         s2 = self.get_processed_screen()
+    #         self.current_screen = s2
+    #         return s2 - s1
+    
     def get_state(self):
-        if self.just_starting() or self.done:
-            self.current_screen = self.get_processed_screen()
-            black_screen = torch.zeros_like(self.current_screen)
-            return black_screen
+        # Instead of processing screen, just return the raw observation
+        if hasattr(self, 'last_observation'):
+            return torch.tensor(self.last_observation, dtype=torch.float32, device=self.device).unsqueeze(0)
         else:
-            s1 = self.current_screen
-            s2 = self.get_processed_screen()
-            self.current_screen = s2
-            return s2 - s1
+            # First call, return zeros
+            return torch.zeros(1, 4, device=self.device)
+
 
     def get_screen_height(self):
         screen = self.get_processed_screen()
@@ -182,8 +233,8 @@ def extract_tensors(experiences):
     batch = Experience(*zip(*experiences))
     t1 = torch.cat(batch.state)
     t2 = torch.cat(batch.action)
-    t3 = torch.cat(batch.reward)
-    t4 = torch.cat(batch.next_state)
+    t3 = torch.cat(batch.next_state)
+    t4 = torch.cat(batch.reward)    
     
     return (t1,t2,t3,t4)
 
@@ -195,17 +246,26 @@ class QValues():
     def get_current(policy_net, states, actions):
         return policy_net(states).gather(dim=1, index=actions.unsqueeze(-1))
     
+    # @staticmethod
+    # def get_next(target_net, next_states):
+    #     final_state_locations = next_states.flatten(start_dim=1) \
+    #         .max(dim=1)[0].eq(0).type(torch.bool)
+    #     non_final_state_locations = (final_state_locations == False)
+    #     non_final_states = next_states[non_final_state_locations]
+    #     batch_size = next_states.shape[0]
+    #     values = torch.zeros(batch_size).to(QValues.device)
+    #     values[non_final_state_locations] = target_net(non_final_states).max(dim=1)[0].detach()
+    #     return values
+    
     @staticmethod
     def get_next(target_net, next_states):
-        final_state_locations = next_states.flatten(start_dim=1) \
-            .max(dim=1)[0].eq(0).type(torch.bool)
-        non_final_state_locations = (final_state_locations == False)
-        non_final_states = next_states[non_final_state_locations]
         batch_size = next_states.shape[0]
         values = torch.zeros(batch_size).to(QValues.device)
-        values[non_final_state_locations] = target_net(non_final_states).max(dim=1)[0].detach()
+        
+        # Instead of trying to detect terminal states from the screen,
+        # just compute Q-values for all states and let the learning process handle it
+        values = target_net(next_states).max(dim=1)[0].detach()
         return values
-
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 em = CartPoleEnvManager(device)
@@ -219,23 +279,27 @@ fig, (ax1, ax2) = getPlots()
 # Example start screen with just black diff screen
 realScreen = em.render("rgb_array")
 realFig = ax1.imshow(realScreen)
-screen = em.get_state()
-# Need to add a `.cpu()` here because matplotlib needs cpu as a device not gpu
-# Same in the other places we're about to draw things.
-stateFig = ax2.imshow(screen.squeeze(0).permute(1, 2, 0).cpu(), interpolation="none")
+# screen = em.get_state()
+# # Need to add a `.cpu()` here because matplotlib needs cpu as a device not gpu
+# # Same in the other places we're about to draw things.
+# stateFig = ax2.imshow(screen.squeeze(0).permute(1, 2, 0).cpu(), interpolation="none")
 plt.show()
 plt.draw()
 plt.pause(0.001)
 print("example start pole with black screen")
 input("enter to continue")
 
-# Example mid-way screen. Shows the progress by diffing the step with previous step
-for i in range(5):
-    em.take_action(torch.tensor([1]))
+def show_updates(em, diff):
     realScreen = em.render("rgb_array")
     realFig.set_data(realScreen)
+    # stateFig.set_data(diff.squeeze(0).permute(1, 2, 0).cpu())
+    plt.pause(0.001)
+
+# Example mid-way screen. Shows the progress by diffing the step with previous step
+for i in range(5):
+    rrr = em.take_action(torch.tensor([1]))
     stateScreen = em.get_state()
-    stateFig.set_data(stateScreen.squeeze(0).permute(1, 2, 0).cpu())
+    show_updates(em, stateScreen)
     plt.pause(0.001)
 
     # input("enter to continue")
@@ -319,8 +383,11 @@ memory = ReplayMemory(memory_size)
 2. Initialize the policy network with random weights.
 3. Clone the policy network and call it the taret network
 """
-policy_net = DQN(em.get_screen_height(), em.get_screen_width()).to(device=device)
-target_net = DQN(em.get_screen_height(), em.get_screen_width()).to(device=device)
+# policy_net = DQN(em.get_screen_height(), em.get_screen_width()).to(device=device)
+# target_net = DQN(em.get_screen_height(), em.get_screen_width()).to(device=device)
+
+policy_net = SimpleDQN().to(device=device)
+target_net = SimpleDQN().to(device=device)
 target_net.load_state_dict(policy_net.state_dict())
 target_net.eval()
 optimizer = optim.Adam(params=policy_net.parameters(), lr=learning_rate)
@@ -335,6 +402,8 @@ for episode in range(num_episodes):
     em.reset()
     state = em.get_state()
     
+    print(f"\n=== Episode {episode} ===")
+    episode_reward = 0
     """
     2. For each time step:
         1. Select an action. Via exploration or exploitation
@@ -358,8 +427,27 @@ for episode in range(num_episodes):
         """
         action = agent.select_action(state, policy_net=policy_net)
         reward = em.take_action(action)
+        
+        # This was an idea to give it extra bonus points for lasting longer.
+        # But it seems like it just confused the rewards. I'll have to think more here.
+        # episode_reward = reward * timestep
+        # if reward.item() <= 0:
+        #     episode_reward = reward 
+            
         next_state = em.get_state()
+        
+        # I don't need to watch every attempt, maybe just 1 in 10
+        if episode % 50 == 0:
+            show_updates(em, next_state)
+            
         memory.push(Experience(state, action, next_state, reward))
+        # It got really good so I need to stop it at some point or it'll never finish
+        if em.done or timestep > 500:
+            if timestep > 500:
+                print("Got to the limit")
+            episode_durations.append(timestep)
+            plot(episode_durations, 100)
+            break
         state = next_state
         
         """
@@ -371,7 +459,7 @@ for episode in range(num_episodes):
             6. Preprocess states from batch
             7. Pass batch of preprocessed states to policy network
             """
-            states, actions, rewards, next_states = extract_tensors(experiences)
+            states, actions, next_states, rewards = extract_tensors(experiences)
             current_q_values = QValues.get_current(policy_net, states, actions)
             next_q_values = QValues.get_next(target_net, next_states)
             
@@ -390,11 +478,6 @@ for episode in range(num_episodes):
             loss.backward()
             # Apply updates to weights and biases
             optimizer.step()
-            
-        if em.done:
-            episode_durations.append(timestep)
-            plot(episode_durations, 100)
-            break
         
     if episode % target_update == 0:
         target_net.load_state_dict(policy_net.state_dict())

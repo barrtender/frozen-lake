@@ -62,3 +62,13 @@ Sample output:
  [0.71622126 0.86598137 0.70406733 0.74266812]  
  [0.         0.         0.         0.        ]]
  ```
+
+ # dqn
+
+ Remember to `source .venv/bin/activate` to get the right packages
+
+Run with:
+
+ `python3 dqn.py`
+
+ 
