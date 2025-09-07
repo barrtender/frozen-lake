@@ -1,54 +1,21 @@
-import numpy as np
 import gymnasium as gym
 from gymnasium import __version__
-
-print(__version__)
 import random
-import time
 import math
-from IPython.display import clear_output
 import matplotlib
-matplotlib.use('TkAgg')
 import matplotlib.pyplot as plt
 import matplotlib.axes as Axes
 import matplotlib.figure as Figure
-
-plt.ion()
-
 from collections import namedtuple
 from itertools import count
-from PIL import Image
-
 import torch
 import torch.nn as nn
 import torch.optim as optim
 import torch.nn.functional as F
-import torchvision.transforms as T
 
-
-class DQN(nn.Module):
-    def __init__(self, img_height, img_width):
-        super().__init__()
-
-        # self.fc1 = nn.Linear(in_features=img_height * img_width * 3, out_features=24)
-        # self.fc2 = nn.Linear(in_features=24, out_features=32)
-        # self.out = nn.Linear(in_features=32, out_features=2)
-        self.fc1 = nn.Linear(in_features=img_height * img_width * 3, out_features=512)
-        self.fc2 = nn.Linear(in_features=512, out_features=256)
-        self.fc3 = nn.Linear(in_features=256, out_features=128)
-        self.out = nn.Linear(in_features=128, out_features=2)
-        
-    def forward(self, t):
-        # t = t.flatten(start_dim=1)
-        # t = F.relu(self.fc1(t))
-        # t = F.relu(self.fc2(t))
-        # t = self.out(t)
-        t = t.flatten(start_dim=1)
-        t = F.relu(self.fc1(t))
-        t = F.relu(self.fc2(t))
-        t = F.relu(self.fc3(t))
-        t = self.out(t)
-        return t
+print(__version__)
+matplotlib.use('TkAgg')
+plt.ion()
 
 class SimpleDQN(nn.Module):
     def __init__(self):
@@ -64,11 +31,6 @@ class SimpleDQN(nn.Module):
         return t
 
 Experience = namedtuple("Experience", ("state", "action", "next_state", "reward"))
-
-e = Experience(2, 3, 1, 4)
-
-print(e)
-
 
 class ReplayMemory:
     def __init__(self, capacity) -> None:
@@ -125,22 +87,13 @@ class CartPoleEnvManager:
     def __init__(self, device):
         self.device = device
         # Note: render_mode is moved to `make` as opposed to `render` as of 0.25.0.
-        # I don't know if this is going to cause problems in the tutorial
         self.env = gym.make("CartPole-v1", render_mode="rgb_array").unwrapped
         self.env.reset()
-        self.current_screen = None
         self.done = False
-
-    # def reset(self):
-    #     self.env.reset()
-    #     self.current_screen = None
-    #     self.done = False
-
 
     def reset(self):
         observation, _ = self.env.reset()  # Updated for new gym API
         self.last_observation = observation
-        self.current_screen = None
         self.done = False
 
     def close(self):
@@ -152,18 +105,9 @@ class CartPoleEnvManager:
     def num_actions_available(self):
         return self.env.action_space.n
 
-    # def take_action(self, action):
-    #     # Updated for the most recent version
-    #     # See docs here https://gymnasium.farama.org/api/env/#gymnasium.Env.step
-    #     _, reward, terminated, truncated, _ = self.env.step(action.item())
-    #     self.done = terminated or truncated    
-    #     print(f"Raw reward from env: {reward}, terminated: {terminated}, truncated: {truncated}")
-    #     # if self.done:
-    #     #     reward = 0
-    #     return torch.tensor([reward], device=self.device)
-
-
-    def take_action(self, action):
+    def take_action(self, action): 
+        # Updated for the most recent version
+        # See docs here https://gymnasium.farama.org/api/env/#gymnasium.Env.step
         observation, reward, terminated, truncated, _ = self.env.step(action.item())
         self.done = terminated or truncated
         self.last_observation = observation  # Store for next get_state() call
@@ -171,21 +115,6 @@ class CartPoleEnvManager:
             reward = -1
         return torch.tensor([reward], device=self.device)
 
-
-    def just_starting(self):
-        return self.current_screen is None
-
-    # def get_state(self):
-    #     if self.just_starting():
-    #         self.current_screen = self.get_processed_screen()
-    #         black_screen = torch.zeros_like(self.current_screen)
-    #         return black_screen
-    #     else:
-    #         s1 = self.current_screen
-    #         s2 = self.get_processed_screen()
-    #         self.current_screen = s2
-    #         return s2 - s1
-    
     def get_state(self):
         # Instead of processing screen, just return the raw observation
         if hasattr(self, 'last_observation'):
@@ -193,41 +122,6 @@ class CartPoleEnvManager:
         else:
             # First call, return zeros
             return torch.zeros(1, 4, device=self.device)
-
-
-    def get_screen_height(self):
-        screen = self.get_processed_screen()
-        return screen.shape[2]
-
-    def get_screen_width(self):
-        screen = self.get_processed_screen()
-        return screen.shape[3]
-
-    def get_processed_screen(self):
-        screen = self.render("rgb_array").transpose((2, 0, 1))
-        screen = self.crop_screen(screen)
-        return self.transform_screen_data(screen)
-
-    def crop_screen(self, screen):
-        screen_height = screen.shape[1]
-
-        # Strip off top and bottom
-        top = int(screen_height * 0.4)
-        bottom = int(screen_height * 0.8)
-        screen = screen[:, top:bottom, :]
-        return screen
-
-    def transform_screen_data(self, screen):
-        # Convert to float, rescale, convert to tensor
-        screen = np.ascontiguousarray(screen, dtype=np.float32) / 255
-        screen = torch.from_numpy(screen)
-
-        # Use torchfvision package to compose image transforms
-        resize = T.Compose([T.ToPILImage(), T.Resize((40, 90)), T.ToTensor()])
-
-        return resize(screen).unsqueeze(0).to(self.device)  # add a batch dimension
-
-
 
 def extract_tensors(experiences):
     batch = Experience(*zip(*experiences))
@@ -245,18 +139,7 @@ class QValues():
     @staticmethod
     def get_current(policy_net, states, actions):
         return policy_net(states).gather(dim=1, index=actions.unsqueeze(-1))
-    
-    # @staticmethod
-    # def get_next(target_net, next_states):
-    #     final_state_locations = next_states.flatten(start_dim=1) \
-    #         .max(dim=1)[0].eq(0).type(torch.bool)
-    #     non_final_state_locations = (final_state_locations == False)
-    #     non_final_states = next_states[non_final_state_locations]
-    #     batch_size = next_states.shape[0]
-    #     values = torch.zeros(batch_size).to(QValues.device)
-    #     values[non_final_state_locations] = target_net(non_final_states).max(dim=1)[0].detach()
-    #     return values
-    
+
     @staticmethod
     def get_next(target_net, next_states):
         batch_size = next_states.shape[0]
@@ -267,61 +150,20 @@ class QValues():
         values = target_net(next_states).max(dim=1)[0].detach()
         return values
 
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-em = CartPoleEnvManager(device)
-em.reset()
-
-# I couldn't figure out how to get the type hinting without making a new function
-def getPlots() -> tuple[Figure.Figure, tuple[Axes.Axes, Axes.Axes]]:
-    return plt.subplots(1, 2)
-fig, (ax1, ax2) = getPlots()
-
-# Example start screen with just black diff screen
-realScreen = em.render("rgb_array")
-realFig = ax1.imshow(realScreen)
-# screen = em.get_state()
-# # Need to add a `.cpu()` here because matplotlib needs cpu as a device not gpu
-# # Same in the other places we're about to draw things.
-# stateFig = ax2.imshow(screen.squeeze(0).permute(1, 2, 0).cpu(), interpolation="none")
-plt.show()
-plt.draw()
-plt.pause(0.001)
-print("example start pole with black screen")
-input("enter to continue")
-
-def show_updates(em, diff):
+def show_updates(em):
     realScreen = em.render("rgb_array")
     realFig.set_data(realScreen)
-    # stateFig.set_data(diff.squeeze(0).permute(1, 2, 0).cpu())
     plt.pause(0.001)
-
-# Example mid-way screen. Shows the progress by diffing the step with previous step
-for i in range(5):
-    rrr = em.take_action(torch.tensor([1]))
-    stateScreen = em.get_state()
-    show_updates(em, stateScreen)
-    plt.pause(0.001)
-
-    # input("enter to continue")
-
-print("after a few steps, pole and diff")
-input("enter to continue")
 
 
 def plot(values, moving_avg_period):
-    plt.figure(2)
-    plt.clf()
-    plt.title("Training...")
-    plt.xlabel("Episode")
-    plt.ylabel("Duration")
-    plt.plot(values)
+    ax2.clear()
+    ax2.plot(values, "-b")
     moving_avg = get_moving_average(moving_avg_period, values)
-    plt.plot(moving_avg)
+    ax2.plot(moving_avg, "-r")
     plt.pause(0.001)
     print("Episode", len(values), "\n", \
         moving_avg_period, "episode moving avg:", moving_avg[-1])
-    # idk what this is.
-    # if is_ipython: display.clear_output(wait=True)
 
 
 def get_moving_average(period, values):
@@ -338,6 +180,37 @@ def get_moving_average(period, values):
         moving_avg = torch.zeros(len(values))
         return moving_avg.numpy()
 
+# A couple example steps before training.
+
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+em = CartPoleEnvManager(device)
+em.reset()
+
+# I couldn't figure out how to get the type hinting without making a new function
+def getPlots() -> tuple[Figure.Figure, tuple[Axes.Axes, Axes.Axes]]:
+    return plt.subplots(1, 2)
+fig, (ax1, ax2) = getPlots()
+
+# Example start screen with blank training plot
+realScreen = em.render("rgb_array")
+realFig = ax1.imshow(realScreen)
+ax2.set_title("Training...")
+ax2.set_xlabel("Episode")
+ax2.set_ylabel("Duration")
+plt.show()
+plt.draw()
+plt.pause(0.001)
+print("example start pole")
+input("enter to continue")
+
+# Example mid-way screen. Shows the progress of a few actions
+for i in range(5):
+    em.take_action(torch.tensor([1]))
+    show_updates(em)
+    plt.pause(0.001)
+
+print("after a few steps, pole")
+input("enter to continue")
 
 
 # Now on to training. Here's what we're doing
@@ -383,8 +256,6 @@ memory = ReplayMemory(memory_size)
 2. Initialize the policy network with random weights.
 3. Clone the policy network and call it the taret network
 """
-# policy_net = DQN(em.get_screen_height(), em.get_screen_width()).to(device=device)
-# target_net = DQN(em.get_screen_height(), em.get_screen_width()).to(device=device)
 
 policy_net = SimpleDQN().to(device=device)
 target_net = SimpleDQN().to(device=device)
@@ -436,9 +307,9 @@ for episode in range(num_episodes):
             
         next_state = em.get_state()
         
-        # I don't need to watch every attempt, maybe just 1 in 10
-        if episode % 50 == 0:
-            show_updates(em, next_state)
+        # I don't need to watch every attempt, maybe just 1 in 30
+        if episode % 30 == 0:
+            show_updates(em)
             
         memory.push(Experience(state, action, next_state, reward))
         # It got really good so I need to stop it at some point or it'll never finish
@@ -454,12 +325,12 @@ for episode in range(num_episodes):
         5. Sample random batch from replay memory
         """
         if memory.can_provide_sample(batch_size):
-            experiences = memory.sample(batch_size)
+            experience = memory.sample(batch_size)
             """
             6. Preprocess states from batch
             7. Pass batch of preprocessed states to policy network
             """
-            states, actions, next_states, rewards = extract_tensors(experiences)
+            states, actions, next_states, rewards = extract_tensors(experience)
             current_q_values = QValues.get_current(policy_net, states, actions)
             next_q_values = QValues.get_next(target_net, next_states)
             
@@ -474,9 +345,14 @@ for episode in range(num_episodes):
             loss = F.mse_loss(current_q_values, target_q_values.unsqueeze(1))
             # Zero-out gradients to prevent accumulation from previous backprop runs
             optimizer.zero_grad()
-            # Calculate the necessary updates to the weights and biases (the gradient)
+            # Calculate the necessary updates to the weights and biases (the gradient).
+            # This sets the .grad property on all the parameters in the network
+            # Since the loss was passed the current_q_values which was passed the policy_net
+            # the PyTorch "autograd system" can trace all the way back to the original policy_net, 
+            # so it's still connected despite never being passed directly to loss
             loss.backward()
             # Apply updates to weights and biases
+            # This applies the .grad property that was set by the loss.backward() call
             optimizer.step()
         
     if episode % target_update == 0:
